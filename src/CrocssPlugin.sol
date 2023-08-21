@@ -4,8 +4,8 @@ pragma solidity >=0.8.17;
 import { PluginUUPSUpgradeable, IDAO } from "@osx/core/plugin/PluginUUPSUpgradeable.sol";
 
 contract CrocssPlugin {
-  function id(uint256 value) external pure returns (uint256) {
-    return value;
+  function initializePlugin1(IDAO _dao) external initializer {
+    __PluginUUPSUpgradeable_init(_dao);
   }
 }
 

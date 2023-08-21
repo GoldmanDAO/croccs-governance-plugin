@@ -1,0 +1,4 @@
+@prb/test/=lib/prb-test/src/
+forge-std/=lib/forge-std/src/
+@osx/=lib/osx/packages/contracts/src/
+@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/

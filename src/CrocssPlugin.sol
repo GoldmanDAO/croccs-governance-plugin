@@ -100,7 +100,15 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     uint64 _endDate,
     VoteOption _voteOption,
     bool _tryEarlyExecution
-  ) external override returns (uint256 proposalId) {
+  ) external override returns (uint256 proposalId) {}
+
+  function createProposal(
+    bytes calldata _metadata,
+    IDAO.Action[] calldata _actions,
+    uint256 _allowFailureMap,
+    uint64 _startDate,
+    uint64 _endDate
+  ) external returns (uint256 proposalId) {
     // Check that either `_msgSender` owns enough tokens or has enough voting power from being a delegatee.
     {
       uint256 minProposerVotingPower_ = minProposerVotingPower();
@@ -159,11 +167,9 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
         ++i;
       }
     }
-
-    if (_voteOption != VoteOption.None) {
-      vote(proposalId, _voteOption, _tryEarlyExecution);
-    }
   }
+
+  function _vote(uint256 _proposalId, VoteOption _voteOption, address _voter) internal {}
 
   /// @inheritdoc MajorityVotingBase
   function _vote(
@@ -178,4 +184,3 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
   /// https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps
   uint256[49] private __gap;
 }
-

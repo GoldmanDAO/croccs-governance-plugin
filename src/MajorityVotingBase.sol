@@ -298,12 +298,6 @@ abstract contract MajorityVotingBase is
     bool _tryEarlyExecution
   ) external virtual returns (uint256 proposalId);
 
-  /// @notice Internal function to cast a vote. It assumes the queried vote exists.
-  /// @param _proposalId The ID of the proposal.
-  /// @param _voteOption The chosen vote option to be casted on the proposal vote.
-  /// @param _tryEarlyExecution If `true`,  early execution is tried after the vote cast. The call does not revert if early execution is not possible.
-  function _vote(uint256 _proposalId, VoteOption _voteOption, address _voter, bool _tryEarlyExecution) internal virtual;
-
   /// @notice Internal function to execute a vote. It assumes the queried proposal exists.
   /// @param _proposalId The ID of the proposal.
   function _execute(uint256 _proposalId) internal virtual {

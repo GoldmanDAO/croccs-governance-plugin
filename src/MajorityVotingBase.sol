@@ -34,6 +34,13 @@ abstract contract MajorityVotingBase is
     uint256 minProposerVotingPower;
   }
 
+  enum ProposalState {
+    ACTIVE,
+    VETOED,
+    INVALID,
+    EXECUTED
+  }
+
   /// @notice A container for proposal-related information.
   /// @param executed Whether the proposal is executed or not.
   /// @param parameters The proposal parameters at the time of the proposal creation.
@@ -42,13 +49,12 @@ abstract contract MajorityVotingBase is
   /// @param actions The actions to be executed when the proposal passes.
   /// @param allowFailureMap A bitmap allowing the proposal to succeed, even if individual actions might revert. If the bit at index `i` is 1, the proposal succeeds even if the `i`th action reverts. A failure map value of 0 requires every action to not revert.
   struct Proposal {
-    bool executed;
+    ProposalState status;
     ProposalParameters parameters;
     Tally tally;
     mapping(address => IMajorityVoting.VoteOption) voters;
     IDAO.Action[] actions;
     uint256 allowFailureMap;
-    bytes32[] proof;
   }
 
   /// @notice A container for the proposal parameters at the time of proposal creation.
@@ -63,6 +69,7 @@ abstract contract MajorityVotingBase is
     uint64 endDate;
     uint64 snapshotBlock;
     uint256 minVotingPower;
+    bytes32 merkleRoot;
   }
 
   /// @notice A container for the proposal vote tally.
@@ -241,7 +248,7 @@ abstract contract MajorityVotingBase is
   /// @notice Returns all information for a proposal vote by its ID.
   /// @param _proposalId The ID of the proposal.
   /// @return open Whether the proposal is open or not.
-  /// @return executed Whether the proposal is executed or not.
+  /// @return status Whether the proposal is executed or not.
   /// @return parameters The parameters of the proposal vote.
   /// @return tally The current tally of the proposal vote.
   /// @return actions The actions to be executed in the associated DAO after the proposal has passed.
@@ -254,7 +261,7 @@ abstract contract MajorityVotingBase is
     virtual
     returns (
       bool open,
-      bool executed,
+      ProposalState status,
       ProposalParameters memory parameters,
       Tally memory tally,
       IDAO.Action[] memory actions,
@@ -264,7 +271,7 @@ abstract contract MajorityVotingBase is
     Proposal storage proposal_ = proposals[_proposalId];
 
     open = _isProposalOpen(proposal_);
-    executed = proposal_.executed;
+    status = proposal_.status;
     parameters = proposal_.parameters;
     tally = proposal_.tally;
     actions = proposal_.actions;
@@ -285,8 +292,6 @@ abstract contract MajorityVotingBase is
   /// @param _allowFailureMap Allows proposal to succeed even if an action reverts. Uses bitmap representation. If the bit at index `x` is 1, the tx succeeds even if the action at `x` failed. Passing 0 will be treated as atomic execution.
   /// @param _startDate The start date of the proposal vote. If 0, the current timestamp is used and the vote starts immediately.
   /// @param _endDate The end date of the proposal vote. If 0, `_startDate + minDuration` is used.
-  /// @param _voteOption The chosen vote option to be casted on proposal creation.
-  /// @param _tryEarlyExecution If `true`,  early execution is tried after the vote cast. The call does not revert if early execution is not possible.
   /// @return proposalId The ID of the proposal.
   function createProposal(
     bytes calldata _metadata,
@@ -294,14 +299,14 @@ abstract contract MajorityVotingBase is
     uint256 _allowFailureMap,
     uint64 _startDate,
     uint64 _endDate,
-    VoteOption _voteOption,
-    bool _tryEarlyExecution
+    uint256 _blockNumber,
+    bytes32 _hash
   ) external virtual returns (uint256 proposalId);
 
   /// @notice Internal function to execute a vote. It assumes the queried proposal exists.
   /// @param _proposalId The ID of the proposal.
   function _execute(uint256 _proposalId) internal virtual {
-    proposals[_proposalId].executed = true;
+    proposals[_proposalId].status = ProposalState.EXECUTED;
 
     _executeProposal(dao(), _proposalId, proposals[_proposalId].actions, proposals[_proposalId].allowFailureMap);
   }
@@ -321,7 +326,7 @@ abstract contract MajorityVotingBase is
     Proposal storage proposal_ = proposals[_proposalId];
 
     // Verify that the vote has not been executed already.
-    if (proposal_.executed) {
+    if (proposal_.status != ProposalState.ACTIVE) {
       return false;
     }
 
@@ -345,7 +350,7 @@ abstract contract MajorityVotingBase is
     return
       proposal_.parameters.startDate <= currentTime &&
       currentTime < proposal_.parameters.endDate &&
-      !proposal_.executed;
+      proposal_.status == ProposalState.ACTIVE;
   }
 
   /// @notice Internal function to update the plugin-wide proposal vote settings.

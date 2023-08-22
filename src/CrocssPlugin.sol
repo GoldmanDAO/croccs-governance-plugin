@@ -93,17 +93,6 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     return true;
   }
 
-  /// @inheritdoc MajorityVotingBase
-  function createProposal(
-    bytes calldata _metadata,
-    IDAO.Action[] calldata _actions,
-    uint256 _allowFailureMap,
-    uint64 _startDate,
-    uint64 _endDate,
-    VoteOption _voteOption,
-    bool _tryEarlyExecution
-  ) external override returns (uint256 proposalId) {}
-
   function createProposal(
     bytes calldata _metadata,
     IDAO.Action[] calldata _actions,
@@ -111,8 +100,8 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     uint64 _startDate,
     uint64 _endDate,
     uint256 _blockNumber,
-    bytes32[] memory proof
-  ) external returns (uint256 proposalId) {
+    bytes32 _hash
+  ) external override returns (uint256 proposalId) {
     // Check that either `_msgSender` owns enough tokens or has enough voting power from being a delegatee.
     {
       uint256 minProposerVotingPower_ = minProposerVotingPower();
@@ -157,7 +146,7 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     proposal_.parameters.snapshotBlock = uint64(_blockNumber);
     proposal_.parameters.supportThreshold = supportThreshold();
     proposal_.parameters.minVotingPower = _applyRatioCeiled(totalVotingPower_, minParticipation());
-    proposal_.proof = proof;
+    proposal_.parameters.merkleRoot = _hash;
 
     // Reduce costs
     if (_allowFailureMap != 0) {
@@ -170,6 +159,20 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
         ++i;
       }
     }
+  }
+
+  function proofWrongMembership(uint256 _proposalId, address _member, bytes32[] memory _proof) external returns (bool) {
+    uint256 memberBalance = votingToken.getPastVotes(_member, proposals[_proposalId].parameters.snapshotBlock);
+
+    bytes32 memberHash = keccak256(abi.encodePacked(_member, memberBalance));
+    bool prooved = MerkleProof.verify(_proof, proposals[_proposalId].parameters.merkleRoot, memberHash);
+    if (!prooved) {
+      // Canceling the proposal
+      proposals[_proposalId].status = ProposalState.INVALID;
+      return false;
+    }
+
+    return true;
   }
 
   /// @dev This empty reserved space is put in place to allow future versions to add new

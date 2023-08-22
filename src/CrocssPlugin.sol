@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.17;
 
-import { MajorityVotingBase } from "@osx/plugins/governance/majority-voting/MajorityVotingBase.sol";
+import { MajorityVotingBase } from "./MajorityVotingBase.sol";
 import { IMembership } from "@osx/core/plugin/membership/IMembership.sol";
 import { IDAO } from "@osx/core/dao/IDAO.sol";
 import { IVotesUpgradeable } from "@openzeppelin/contracts-upgradeable/governance/utils/IVotesUpgradeable.sol";
 import { IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import { RATIO_BASE, _applyRatioCeiled } from "@osx/plugins/utils/Ratio.sol";
+import { MerkleProof } from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 contract CrocssPlugin is IMembership, MajorityVotingBase {
   /// @notice The [ERC-165](https://eips.ethereum.org/EIPS/eip-165) interface ID of the contract.
@@ -17,6 +18,9 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
 
   /// @notice Thrown if the voting power is zero
   error NoVotingPower();
+
+  /// @notice Thrown if the block is not within 10 blocks of distance
+  error InvalidBlock();
 
   function initialize(
     IDAO _dao,
@@ -82,9 +86,7 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     }
 
     // The voter has already voted but vote replacment is not allowed.
-    if (
-      proposal_.voters[_account] != VoteOption.None && proposal_.parameters.votingMode != VotingMode.VoteReplacement
-    ) {
+    if (proposal_.voters[_account] != VoteOption.None) {
       return false;
     }
 
@@ -107,7 +109,9 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     IDAO.Action[] calldata _actions,
     uint256 _allowFailureMap,
     uint64 _startDate,
-    uint64 _endDate
+    uint64 _endDate,
+    uint256 _blockNumber,
+    bytes32[] memory proof
   ) external returns (uint256 proposalId) {
     // Check that either `_msgSender` owns enough tokens or has enough voting power from being a delegatee.
     {
@@ -124,12 +128,11 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
       }
     }
 
-    uint256 snapshotBlock;
-    unchecked {
-      snapshotBlock = block.number - 1; // The snapshot block must be mined already to protect the transaction against backrunning transactions causing census changes.
+    if (_blockNumber > block.number - 10 || _blockNumber < block.number) {
+      revert InvalidBlock();
     }
 
-    uint256 totalVotingPower_ = totalVotingPower(snapshotBlock);
+    uint256 totalVotingPower_ = totalVotingPower(_blockNumber);
 
     if (totalVotingPower_ == 0) {
       revert NoVotingPower();
@@ -151,10 +154,10 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
 
     proposal_.parameters.startDate = _startDate;
     proposal_.parameters.endDate = _endDate;
-    proposal_.parameters.snapshotBlock = uint64(snapshotBlock);
-    proposal_.parameters.votingMode = votingMode();
+    proposal_.parameters.snapshotBlock = uint64(_blockNumber);
     proposal_.parameters.supportThreshold = supportThreshold();
     proposal_.parameters.minVotingPower = _applyRatioCeiled(totalVotingPower_, minParticipation());
+    proposal_.proof = proof;
 
     // Reduce costs
     if (_allowFailureMap != 0) {

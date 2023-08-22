@@ -161,7 +161,7 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     }
   }
 
-  function proofWrongMembership(uint256 _proposalId, address _member, bytes32[] memory _proof) external returns (bool) {
+  function proveWrongMembership(uint256 _proposalId, address _member, bytes32[] memory _proof) external returns (bool) {
     uint256 memberBalance = votingToken.getPastVotes(_member, proposals[_proposalId].parameters.snapshotBlock);
 
     bytes32 memberHash = keccak256(abi.encodePacked(_member, memberBalance));
@@ -169,10 +169,29 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     if (!prooved) {
       // Canceling the proposal
       proposals[_proposalId].status = ProposalState.INVALID;
+      return true;
+    }
+
+    return false;
+  }
+
+  // TODO: Finish this function
+  function proveShouldBeMember(uint256 _proposalId, address _member, bytes32[] memory _proof) external returns (bool) {
+    uint256 memberBalance = votingToken.getPastVotes(_member, proposals[_proposalId].parameters.snapshotBlock);
+
+    if (memberBalance == 0) {
       return false;
     }
 
-    return true;
+    bytes32 memberHash = keccak256(abi.encodePacked(_member, memberBalance));
+    bool prooved = MerkleProof.verify(_proof, proposals[_proposalId].parameters.merkleRoot, memberHash);
+    if (!prooved) {
+      // Canceling the proposal
+      proposals[_proposalId].status = ProposalState.INVALID;
+      return true;
+    }
+
+    return false;
   }
 
   /// @dev This empty reserved space is put in place to allow future versions to add new

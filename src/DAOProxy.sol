@@ -7,6 +7,24 @@ import { Initializable } from "@openzeppelin/contracts/proxy/utils/initializable
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 contract DAOProxy is Initializable, ReentrancyGuard {
+  enum VoteOption {
+    None,
+    Abstain,
+    Yes,
+    No
+  }
+  struct Action {
+    address to;
+    uint256 value;
+    bytes data;
+  }
+
+  struct L2Proposal {
+    uint256 proposalId;
+    uint64 endDate;
+    bytes32 merkleRoot;
+  }
+
   /// @notice Thrown if the action array length is larger than `MAX_ACTIONS`.
   error TooManyActions();
 
@@ -17,18 +35,16 @@ contract DAOProxy is Initializable, ReentrancyGuard {
   /// @notice Thrown if an action has insufficent gas left.
   error InsufficientGas();
 
+  error ProposalAlreadyExists(uint256 _proposalId);
+
   uint256 internal constant MAX_ACTIONS = 256;
 
   IL2CrossDomainMessenger public bridge;
   address public parentDAO;
-
-  struct Action {
-    address to;
-    uint256 value;
-    bytes data;
-  }
+  mapping(uint256 => L2Proposal) proposals;
 
   event Executed(Action[] actions, uint256 allowFailureMap, uint256 failureMap, bytes[] execResults);
+  event ProposalCreated(uint256 indexed proposalId, uint64 endDate, bytes32 merkleRoot);
 
   modifier onlyParentDAO() {
     require(msg.sender == address(bridge) && bridge.xDomainMessageSender() == parentDAO, "Not parent DAO");
@@ -39,6 +55,29 @@ contract DAOProxy is Initializable, ReentrancyGuard {
     bridge = _bridge;
     parentDAO = _parentDAO;
   }
+
+  function createProposal(
+    uint256 _proposalId,
+    uint64 _endDate,
+    bytes32 _merkleRoot
+  ) external onlyParentDAO nonReentrant {
+    if (proposals[_proposalId].proposalId == _proposalId) {
+      revert ProposalAlreadyExists(_proposalId);
+    }
+
+    proposals[_proposalId] = L2Proposal(_proposalId, _endDate, _merkleRoot);
+    emit ProposalCreated(_proposalId, _endDate, _merkleRoot);
+  }
+
+  function vote(
+    uint256 _propopsalId,
+    VoteOption _voteOption,
+    bytes32[] memory _proof,
+    address _addr,
+    uint256 _amount
+  ) external nonReentrant {}
+
+  function relyResults(uint256 _proposalId) external {}
 
   function execute(Action[] calldata _actions, uint256 _allowFailureMap) external onlyParentDAO nonReentrant {
     if (_actions.length > MAX_ACTIONS) revert TooManyActions();

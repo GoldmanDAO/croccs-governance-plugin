@@ -68,6 +68,7 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     address _account,
     VoteOption _voteOption
   ) internal view override returns (bool) {
+    // TODO: Add here verification for the merkle tree
     Proposal storage proposal_ = proposals[_proposalId];
 
     // The proposal vote hasn't started or has already ended.

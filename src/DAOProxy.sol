@@ -6,14 +6,9 @@ import { IMajorityVoting } from "src/IMajorityVoting.sol";
 import { hasBit, flipBit } from "@osx/core/utils/BitMap.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/initializable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { MerkleProof } from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 contract DAOProxy is Initializable, ReentrancyGuard {
-  enum VoteOption {
-    None,
-    Abstain,
-    Yes,
-    No
-  }
   struct Action {
     address to;
     uint256 value;
@@ -43,7 +38,11 @@ contract DAOProxy is Initializable, ReentrancyGuard {
   /// @notice Thrown if an action has insufficent gas left.
   error InsufficientGas();
 
-  error ProposalAlreadyExists(uint256 _proposalId);
+  error ProposalAlreadyExists(uint256 proposalId);
+
+  error AddressAlreadyVoted(address account);
+  error AddressAmountNotInTree(address account, uint256 amount);
+  error ProposalIsFinished(uint256 proposalId);
 
   uint256 internal constant MAX_ACTIONS = 256;
 
@@ -52,6 +51,18 @@ contract DAOProxy is Initializable, ReentrancyGuard {
   mapping(uint256 => L2Proposal) proposals;
 
   event Executed(Action[] actions, uint256 allowFailureMap, uint256 failureMap, bytes[] execResults);
+  /// @notice Emitted when a vote is cast by a voter.
+  /// @param proposalId The ID of the proposal.
+  /// @param voter The voter casting the vote.
+  /// @param voteOption The casted vote option.
+  /// @param votingPower The voting power behind this vote.
+  event VoteCast(
+    uint256 indexed proposalId,
+    address indexed voter,
+    IMajorityVoting.VoteOption voteOption,
+    uint256 votingPower
+  );
+
   event ProposalCreated(uint256 indexed proposalId, uint64 endDate, bytes32 merkleRoot);
 
   modifier onlyParentDAO() {
@@ -78,12 +89,49 @@ contract DAOProxy is Initializable, ReentrancyGuard {
   }
 
   function vote(
-    uint256 _propopsalId,
-    VoteOption _voteOption,
+    uint256 _proposalId,
+    IMajorityVoting.VoteOption _voteOption,
     bytes32[] memory _proof,
     address _addr,
     uint256 _amount
-  ) public virtual {}
+  ) public virtual {
+    L2Proposal storage proposal = proposals[_proposalId];
+
+    bytes32 memberHash = keccak256(abi.encodePacked(_addr, _amount));
+    bool proof = MerkleProof.verify(_proof, proposal.merkleRoot, memberHash);
+
+    if (proof == false) {
+      revert AddressAmountNotInTree(_addr, _amount);
+    }
+
+    // Check if proposal still open
+    if (proposal.endDate > block.number) {
+      revert ProposalIsFinished(_proposalId);
+    }
+
+    IMajorityVoting.VoteOption state = proposal.voters[_addr];
+
+    // If voter had previously voted, decrease count
+    if (state == IMajorityVoting.VoteOption.Yes) {
+      proposal.tally.yes = proposal.tally.yes - _amount;
+    } else if (state == IMajorityVoting.VoteOption.No) {
+      proposal.tally.no = proposal.tally.no - _amount;
+    } else if (state == IMajorityVoting.VoteOption.Abstain) {
+      proposal.tally.abstain = proposal.tally.abstain - _amount;
+    }
+
+    // write the updated/new vote for the voter.
+    if (_voteOption == IMajorityVoting.VoteOption.Yes) {
+      proposal.tally.yes = proposal.tally.yes + _amount;
+    } else if (_voteOption == IMajorityVoting.VoteOption.No) {
+      proposal.tally.no = proposal.tally.no + _amount;
+    } else if (_voteOption == IMajorityVoting.VoteOption.Abstain) {
+      proposal.tally.abstain = proposal.tally.abstain + _amount;
+    }
+
+    proposal.voters[_addr] = _voteOption;
+    emit VoteCast({ proposalId: _proposalId, voter: _addr, voteOption: _voteOption, votingPower: _amount });
+  }
 
   function relyResults(uint256 _proposalId) external {}
 

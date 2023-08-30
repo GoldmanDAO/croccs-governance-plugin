@@ -2,6 +2,7 @@
 pragma solidity ^0.8.17;
 
 import { IL2CrossDomainMessenger } from "src/interfaces/IL2CrossDomainMessenger.sol";
+import { IMajorityVoting } from "src/IMajorityVoting.sol";
 import { hasBit, flipBit } from "@osx/core/utils/BitMap.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/initializable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -18,11 +19,18 @@ contract DAOProxy is Initializable, ReentrancyGuard {
     uint256 value;
     bytes data;
   }
+  struct Tally {
+    uint256 abstain;
+    uint256 yes;
+    uint256 no;
+  }
 
   struct L2Proposal {
     uint256 proposalId;
     uint64 endDate;
     bytes32 merkleRoot;
+    Tally tally;
+    mapping(address => IMajorityVoting.VoteOption) voters;
   }
 
   /// @notice Thrown if the action array length is larger than `MAX_ACTIONS`.
@@ -56,16 +64,16 @@ contract DAOProxy is Initializable, ReentrancyGuard {
     parentDAO = _parentDAO;
   }
 
-  function createProposal(
-    uint256 _proposalId,
-    uint64 _endDate,
-    bytes32 _merkleRoot
-  ) external onlyParentDAO nonReentrant {
+  function createProposal(uint256 _proposalId, uint64 _endDate, bytes32 _merkleRoot) external onlyParentDAO {
     if (proposals[_proposalId].proposalId == _proposalId) {
       revert ProposalAlreadyExists(_proposalId);
     }
 
-    proposals[_proposalId] = L2Proposal(_proposalId, _endDate, _merkleRoot);
+    L2Proposal storage proposal = proposals[_proposalId];
+    proposal.proposalId = _proposalId;
+    proposal.endDate = _endDate;
+    proposal.merkleRoot = _merkleRoot;
+
     emit ProposalCreated(_proposalId, _endDate, _merkleRoot);
   }
 
@@ -75,7 +83,7 @@ contract DAOProxy is Initializable, ReentrancyGuard {
     bytes32[] memory _proof,
     address _addr,
     uint256 _amount
-  ) external nonReentrant {}
+  ) public virtual {}
 
   function relyResults(uint256 _proposalId) external {}
 

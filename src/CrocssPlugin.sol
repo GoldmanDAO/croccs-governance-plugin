@@ -8,6 +8,10 @@ import { IVotesUpgradeable } from "@openzeppelin/contracts-upgradeable/governanc
 import { IERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import { RATIO_BASE, _applyRatioCeiled } from "@osx/plugins/utils/Ratio.sol";
 import { MerkleProof } from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+import { ICrossDomainMessenger } from "src/interfaces/ICrossDomainMessenger.sol";
+import { DAOProxyFactory } from "src/DAOProxyFactory.sol";
+import { Clones } from "@openzeppelin/contracts/proxy/Clones.sol";
+import { DAOProxy } from "src/DAOProxy.sol";
 
 contract CrocssPlugin is IMembership, MajorityVotingBase {
   /// @notice The [ERC-165](https://eips.ethereum.org/EIPS/eip-165) interface ID of the contract.
@@ -16,21 +20,47 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
   /// @notice An [OpenZeppelin `Votes`](https://docs.openzeppelin.com/contracts/4.x/api/governance#Votes) compatible contract referencing the token being used for voting.
   IVotesUpgradeable private votingToken;
 
+  // @notice the proxy of the DAO in L2s deployments
+  DAOProxy proxy;
+  ICrossDomainMessenger messenger;
+  DAOProxyFactory proxyFactory;
+
   /// @notice Thrown if the voting power is zero
   error NoVotingPower();
 
   /// @notice Thrown if the block is not within 10 blocks of distance
   error InvalidBlock();
 
+  error ProposalCantBeBridged(uint256 proposalId);
+
+  event ProposalBridged(uint256 proposalId);
+
   function initialize(
     IDAO _dao,
     VotingSettings calldata _votingSettings,
-    IVotesUpgradeable _token
+    IVotesUpgradeable _token,
+    ICrossDomainMessenger _messenger,
+    DAOProxyFactory _factory,
+    address _proxyDAOImplementation
   ) external initializer {
     __MajorityVotingBase_init(_dao, _votingSettings);
 
     votingToken = _token;
 
+    _messenger.sendMessage(
+      address(_factory),
+      abi.encodePacked(_factory.createDAOProxy.selector),
+      500000 // Adjust this number better
+    );
+
+    // TODO: Change to predictDeterministicAddress() instead
+    proxy = DAOProxy(
+      Clones.predictDeterministicAddress(_proxyDAOImplementation, toBytes(address(this)), address(_factory))
+    );
+    messenger = _messenger;
+    proxyFactory = _factory;
+
+    // TODO: Emit proxy dao
     emit MembershipContractAnnounced({ definingContract: address(_token) });
   }
 
@@ -193,6 +223,27 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     }
 
     return false;
+  }
+
+  function bridgeProposal(uint256 _proposalId) external {
+    // Check the proposal is open and ready to bridge
+    Proposal storage proposal = proposals[_proposalId];
+    if (proposal.status != ProposalState.PENDING) {
+      revert ProposalCantBeBridged(_proposalId);
+    }
+
+    // Change the proposal status
+    proposal.status = ProposalState.ACTIVE;
+
+    // Send the bridge a the message to create the proposal
+    messenger.sendMessage(address(proxy), abi.encodePacked(proxy.createProposal.selector), 0);
+
+    // Emit event
+    emit ProposalBridged(_proposalId);
+  }
+
+  function toBytes(address a) public pure returns (bytes32) {
+    return bytes32(uint256(uint160(a)) << 96);
   }
 
   /// @dev This empty reserved space is put in place to allow future versions to add new

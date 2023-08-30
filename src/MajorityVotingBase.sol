@@ -35,6 +35,7 @@ abstract contract MajorityVotingBase is
   }
 
   enum ProposalState {
+    PENDING,
     ACTIVE,
     VETOED,
     INVALID,

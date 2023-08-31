@@ -21,11 +21,11 @@ contract DAOProxyFactory {
     _;
   }
 
-  function createDAOProxy() external onlyBridge {
+  function createDAOProxy(address _pluginAddress) external onlyBridge {
     address _sender = bridge.xDomainMessageSender();
 
     address daoProxy = Clones.cloneDeterministic(proxyDAOImplementation, toBytes(_sender));
-    DAOProxy(daoProxy).initialize(bridge, _sender);
+    DAOProxy(daoProxy).initialize(bridge, _sender, _pluginAddress);
 
     emit DAOProxyDeployed(daoProxy, _sender, 1);
   }

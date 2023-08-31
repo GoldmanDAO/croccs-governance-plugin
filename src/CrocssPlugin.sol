@@ -35,6 +35,11 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
 
   event ProposalBridged(uint256 proposalId);
 
+  modifier onlyProxyDAO() {
+    require(msg.sender == address(messenger) && messenger.xDomainMessageSender() == address(proxy), "Not parent DAO");
+    _;
+  }
+
   function initialize(
     IDAO _dao,
     VotingSettings calldata _votingSettings,
@@ -49,7 +54,7 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
 
     _messenger.sendMessage(
       address(_factory),
-      abi.encodePacked(_factory.createDAOProxy.selector),
+      abi.encodePacked(_factory.createDAOProxy.selector, address(this)),
       500000 // Adjust this number better
     );
 
@@ -236,11 +241,14 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     proposal.status = ProposalState.ACTIVE;
 
     // Send the bridge a the message to create the proposal
+    // TODO: Need to send over the params as well
     messenger.sendMessage(address(proxy), abi.encodePacked(proxy.createProposal.selector), 0);
 
     // Emit event
     emit ProposalBridged(_proposalId);
   }
+
+  function executeProposal(uint _proposalId) external onlyProxyDAO {}
 
   function toBytes(address a) public pure returns (bytes32) {
     return bytes32(uint256(uint160(a)) << 96);

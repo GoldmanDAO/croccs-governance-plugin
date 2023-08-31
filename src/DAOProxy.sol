@@ -7,6 +7,7 @@ import { hasBit, flipBit } from "@osx/core/utils/BitMap.sol";
 import { Initializable } from "@openzeppelin/contracts/proxy/utils/initializable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import { MerkleProof } from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+import { CrocssPlugin } from "src/CrocssPlugin.sol";
 
 contract DAOProxy is Initializable, ReentrancyGuard {
   struct Action {
@@ -43,11 +44,13 @@ contract DAOProxy is Initializable, ReentrancyGuard {
   error AddressAlreadyVoted(address account);
   error AddressAmountNotInTree(address account, uint256 amount);
   error ProposalIsFinished(uint256 proposalId);
+  error ProposalNotFinished(uint256 proposalId);
 
   uint256 internal constant MAX_ACTIONS = 256;
 
   IL2CrossDomainMessenger public bridge;
   address public parentDAO;
+  CrocssPlugin public parentDAOPlugin;
   mapping(uint256 => L2Proposal) proposals;
 
   event Executed(Action[] actions, uint256 allowFailureMap, uint256 failureMap, bytes[] execResults);
@@ -64,15 +67,21 @@ contract DAOProxy is Initializable, ReentrancyGuard {
   );
 
   event ProposalCreated(uint256 indexed proposalId, uint64 endDate, bytes32 merkleRoot);
+  event ResultsBridged(uint256 indexed proposalId, uint8 winnerOption);
 
   modifier onlyParentDAO() {
     require(msg.sender == address(bridge) && bridge.xDomainMessageSender() == parentDAO, "Not parent DAO");
     _;
   }
 
-  function initialize(IL2CrossDomainMessenger _bridge, address _parentDAO) public initializer {
+  function initialize(
+    IL2CrossDomainMessenger _bridge,
+    address _parentDAO,
+    address _parentDAOPlugin
+  ) public initializer {
     bridge = _bridge;
     parentDAO = _parentDAO;
+    parentDAOPlugin = CrocssPlugin(_parentDAOPlugin);
   }
 
   function createProposal(uint256 _proposalId, uint64 _endDate, bytes32 _merkleRoot) external onlyParentDAO {
@@ -133,7 +142,34 @@ contract DAOProxy is Initializable, ReentrancyGuard {
     emit VoteCast({ proposalId: _proposalId, voter: _addr, voteOption: _voteOption, votingPower: _amount });
   }
 
-  function relyResults(uint256 _proposalId) external {}
+  function relyResults(uint256 _proposalId) external {
+    L2Proposal storage proposal = proposals[_proposalId];
+    // Check the proposal ending is in time
+    if (proposal.endDate > block.number) {
+      revert ProposalNotFinished(_proposalId);
+    }
+    // Tecnically you could try relying it again, but it's controlled in the L1
+
+    // Get the results
+    uint8 winnerOption = 0;
+    if (proposal.tally.yes > proposal.tally.no && proposal.tally.yes > proposal.tally.abstain) {
+      winnerOption = 1;
+    } else if (proposal.tally.no > proposal.tally.abstain) {
+      winnerOption = 2;
+    } else {
+      winnerOption = 0;
+    }
+
+    // Get the Messaging Bridge
+    // Send the results over
+    bridge.sendMessage(
+      address(parentDAOPlugin),
+      abi.encodePacked(parentDAOPlugin.executeProposal.selector, _proposalId, winnerOption),
+      0
+    );
+    // Emit an event of results bridged
+    emit ResultsBridged(_proposalId, winnerOption);
+  }
 
   function execute(Action[] calldata _actions, uint256 _allowFailureMap) external onlyParentDAO nonReentrant {
     if (_actions.length > MAX_ACTIONS) revert TooManyActions();

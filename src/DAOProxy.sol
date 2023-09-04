@@ -175,7 +175,7 @@ contract DAOProxy is Initializable, ReentrancyGuard {
     if (_actions.length > MAX_ACTIONS) revert TooManyActions();
 
     bytes[] memory execResults = new bytes[](_actions.length);
-    uint256 failureMap;
+    uint256 failureMap = 0;
 
     uint256 gasBefore;
     uint256 gasAfter;

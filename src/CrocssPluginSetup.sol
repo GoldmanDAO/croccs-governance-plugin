@@ -17,8 +17,11 @@ import { GovernanceERC20 } from "@osx/token/ERC20/governance/GovernanceERC20.sol
 import { GovernanceWrappedERC20 } from "@osx/token/ERC20/governance/GovernanceWrappedERC20.sol";
 import { IGovernanceWrappedERC20 } from "@osx/token/ERC20/governance/IGovernanceWrappedERC20.sol";
 
-import { MajorityVotingBase } from "@osx/plugins/governance/majority-voting/MajorityVotingBase.sol";
+import { MajorityVotingBase } from "../src/MajorityVotingBase.sol";
 import { CrocssPlugin } from "./CrocssPlugin.sol";
+
+import { DAOProxyFactory } from "src/DAOProxyFactory.sol";
+import { ICrossDomainMessenger } from "src/interfaces/ICrossDomainMessenger.sol";
 
 /// @title TokenVotingSetup
 /// @author Aragon Association - 2022-2023
@@ -79,13 +82,21 @@ contract CrocssPluginSetup is PluginSetup {
       MajorityVotingBase.VotingSettings memory votingSettings,
       TokenSettings memory tokenSettings,
       // only used for GovernanceERC20(token is not passed)
-      GovernanceERC20.MintSettings memory mintSettings
-    ) = abi.decode(_data, (MajorityVotingBase.VotingSettings, TokenSettings, GovernanceERC20.MintSettings));
+      GovernanceERC20.MintSettings memory mintSettings,
+      ICrossDomainMessenger messenger,
+      DAOProxyFactory factory,
+      address proxyDAOImplementation
+    ) = abi.decode(_data, (
+      MajorityVotingBase.VotingSettings,
+      TokenSettings,
+      GovernanceERC20.MintSettings,
+      ICrossDomainMessenger,
+      DAOProxyFactory,
+      address
+    ));
+
 
     address token = tokenSettings.addr;
-
-    // Prepare helpers.
-    address[] memory helpers = new address[](1);
 
     if (token != address(0)) {
       if (!token.isContract()) {
@@ -124,13 +135,23 @@ contract CrocssPluginSetup is PluginSetup {
       GovernanceERC20(token).initialize(IDAO(_dao), tokenSettings.name, tokenSettings.symbol, mintSettings);
     }
 
-    helpers[0] = token;
+    {
+        bytes memory encodedData = abi.encodeWithSelector(
+          CrocssPlugin.initialize.selector,
+          _dao,
+          votingSettings,
+          tokenSettings,
+          messenger,
+          factory,
+          proxyDAOImplementation
+        );
 
-    // Prepare and deploy plugin proxy.
-    plugin = createERC1967Proxy(
-      address(tokenVotingBase),
-      abi.encodeWithSelector(CrocssPlugin.initialize.selector, _dao, votingSettings, token)
-    );
+        // Prepare and deploy plugin proxy.
+        plugin = createERC1967Proxy(
+          address(tokenVotingBase),
+          encodedData
+        );
+    }
 
     // Prepare permissions
     PermissionLib.MultiTargetPermission[] memory permissions = new PermissionLib.MultiTargetPermission[](
@@ -175,6 +196,11 @@ contract CrocssPluginSetup is PluginSetup {
         tokenMintPermission
       );
     }
+
+    // Prepare helpers.
+    address[] memory helpers = new address[](1);
+
+    helpers[0] = token;
 
     preparedSetupData.helpers = helpers;
     preparedSetupData.permissions = permissions;

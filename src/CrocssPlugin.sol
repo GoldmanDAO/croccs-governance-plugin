@@ -14,6 +14,8 @@ import { Clones } from "@openzeppelin/contracts/proxy/Clones.sol";
 import { DAOProxy } from "src/DAOProxy.sol";
 
 contract CrocssPlugin is IMembership, MajorityVotingBase {
+  //using SafeCastUpgradeable for uint256; ???
+
   /// @notice The [ERC-165](https://eips.ethereum.org/EIPS/eip-165) interface ID of the contract.
   bytes4 internal constant TOKEN_VOTING_INTERFACE_ID = this.initialize.selector ^ this.getVotingToken.selector;
 
@@ -133,8 +135,8 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
     bytes calldata _metadata,
     IDAO.Action[] calldata _actions,
     uint256 _allowFailureMap,
-    uint64 _startDate,
-    uint64 _endDate,
+    uint64 _startDate,  // TODO: Change to block number?
+    uint64 _endDate,    // TODO: Change to block number?
     uint256 _blockNumber,
     bytes32 _hash
   ) external override returns (uint256 proposalId) {
@@ -189,7 +191,7 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
       proposal_.allowFailureMap = _allowFailureMap;
     }
 
-    for (uint256 i; i < _actions.length; ) {
+    for (uint256 i = 0; i < _actions.length; ) {
       proposal_.actions.push(_actions[i]);
       unchecked {
         ++i;

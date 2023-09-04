@@ -7,28 +7,28 @@ import { IL2CrossDomainMessenger } from "src/interfaces/IL2CrossDomainMessenger.
 import { DAOProxy } from "src/DAOProxy.sol";
 
 contract Deploy is Script {
-  DAOProxyFactory daoFactory;
-  DAOProxy daoProxy;
-  uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-  IL2CrossDomainMessenger xDomainMessenger = IL2CrossDomainMessenger(0x4200000000000000000000000000000000000007);
+    DAOProxyFactory daoFactory;
+    DAOProxy daoProxy;
+    uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+    IL2CrossDomainMessenger xDomainMessenger = IL2CrossDomainMessenger(0x4200000000000000000000000000000000000007);
 
-  function run() public {
-    vm.startBroadcast(deployerPrivateKey);
+    function run() public {
+        vm.startBroadcast(deployerPrivateKey);
 
-    daoProxy = new DAOProxy();
-    daoFactory = new DAOProxyFactory(xDomainMessenger, address(daoProxy));
+        daoProxy = new DAOProxy();
+        daoFactory = new DAOProxyFactory(xDomainMessenger, address(daoProxy));
 
-    vm.stopBroadcast();
-  }
+        vm.stopBroadcast();
+    }
 
-  function runTests(address _xDomainMessenger) public {
-    vm.startBroadcast(deployerPrivateKey);
+    function runTests(address _xDomainMessenger) public {
+        vm.startBroadcast(deployerPrivateKey);
 
-    xDomainMessenger = IL2CrossDomainMessenger(_xDomainMessenger);
+        xDomainMessenger = IL2CrossDomainMessenger(_xDomainMessenger);
 
-    daoProxy = new DAOProxy();
-    daoFactory = new DAOProxyFactory(xDomainMessenger, address(daoProxy));
+        daoProxy = new DAOProxy();
+        daoFactory = new DAOProxyFactory(xDomainMessenger, address(daoProxy));
 
-    vm.stopBroadcast();
-  }
+        vm.stopBroadcast();
+    }
 }

@@ -5,9 +5,9 @@ import "forge-std/Script.sol";
 import { MockL2CrossDomainMessenger } from "test/mocks/MockL2CrossDomainMessenger.sol";
 
 contract DeployMocks is Script {
-  MockL2CrossDomainMessenger mockMessenger;
+    MockL2CrossDomainMessenger mockMessenger;
 
-  function runMocks() public {
-    mockMessenger = new MockL2CrossDomainMessenger();
-  }
+    function runMocks() public {
+        mockMessenger = new MockL2CrossDomainMessenger();
+    }
 }

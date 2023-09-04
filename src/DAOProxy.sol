@@ -4,7 +4,7 @@ pragma solidity ^0.8.17;
 import { IL2CrossDomainMessenger } from "src/interfaces/IL2CrossDomainMessenger.sol";
 import { IMajorityVoting } from "src/IMajorityVoting.sol";
 import { hasBit, flipBit } from "@osx/core/utils/BitMap.sol";
-import { Initializable } from "@openzeppelin/contracts/proxy/utils/initializable.sol";
+import { Initializable } from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import { MerkleProof } from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import { CrocssPlugin } from "src/CrocssPlugin.sol";

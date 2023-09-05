@@ -17,119 +17,92 @@ import { CrocssPluginSetup } from "../src/CrocssPluginSetup.sol";
 import { DAO } from "@osx/core/dao/DAO.sol";
 
 import { IERC20Upgradeable as IERC20 } from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
-import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 import { GovernanceERC20 } from "@osx/token/ERC20/governance/GovernanceERC20.sol";
 import { GovernanceWrappedERC20 } from "@osx/token/ERC20/governance/GovernanceWrappedERC20.sol";
 
-contract MyToken is ERC20 {
-    constructor() ERC20("MyToken", "MTK") { }
-}
-
-contract CrossDomainMessengerMock is ICrossDomainMessenger {
-    address internal xDomainMessageSender_;
-
-    function xDomainMessageSender() external view override returns (address) {
-        return address(0x0);
-    }
-
-    function sendMessage(address _target, bytes calldata _message, uint32 _gasLimit) external override {
-        console2.log("sendMessage");
-    }
-}
+import { MockL2CrossDomainMessenger } from "./mocks/MockL2CrossDomainMessenger.sol";
 
 contract TestCrocssPlugin is PRBTest, StdCheats {
-    CrocssPlugin internal crocssPlugin;
-    CrocssPluginSetup internal crocssPluginSetup;
     address internal creator;
 
-    ERC20 token;
+    CrocssPlugin internal crocssPlugin;
+    CrocssPluginSetup internal crocssPluginSetup;
+    DAOProxyFactory internal factory;
+    address internal proxyDAOImplementation;
+
+    IDAO internal dao;
     GovernanceERC20 internal govToken;
     GovernanceWrappedERC20 internal govWrappedToken;
-    IDAO internal dao;
+    GovernanceERC20.MintSettings internal mintSettings;
+    MajorityVotingBase.VotingSettings internal votingSettings;
+    CrocssPluginSetup.TokenSettings internal tokenSettings;
+
+    MockL2CrossDomainMessenger internal messenger;
 
     function setUp() public virtual {
-        //DeployMocks.runMocks();
         creator = address(0x123);
-        token = new MyToken();
         dao = new DAO();
-        //govToken = new GovernanceERC20(dao, "token1", "t1", GovernanceERC20.MintSettings(members, stakes));
-        //govWrappedToken = new GovernanceWrappedERC20(token, "token2", "t2");
+        address[] memory members = new address[](1);
+        members[0] = creator;
+        uint256[] memory stakes = new uint256[](1);
+        stakes[0] = 100;
+        mintSettings = GovernanceERC20.MintSettings(members, stakes);
+        govToken = new GovernanceERC20(dao, "token1", "t1", GovernanceERC20.MintSettings(members, stakes));
+        govWrappedToken = new GovernanceWrappedERC20(govToken, "token2", "t2");
+        votingSettings = MajorityVotingBase.VotingSettings(0, 0, 4000, 0);
+        tokenSettings = CrocssPluginSetup.TokenSettings(address(govToken), "token3", "t3");
+        messenger = new MockL2CrossDomainMessenger();
+        factory = DAOProxyFactory(address(0xabc));
+        proxyDAOImplementation = address(0xdef);
     }
 
-    function testInit() public {
+    function testCrocssPluginSetup() public {
         crocssPluginSetup = new CrocssPluginSetup(govToken, govWrappedToken);
-        //(MajorityVotingBase.VotingSettings, TokenSettings, GovernanceERC20.MintSettings)
-        MajorityVotingBase.VotingSettings memory votingSettings = MajorityVotingBase.VotingSettings(0, 0, 4000, 0);
-        CrocssPluginSetup.TokenSettings memory tokenSettings =
-            CrocssPluginSetup.TokenSettings(address(token), "token3", "t3");
-        address[] memory members = new address[](0);
-        uint256[] memory stakes = new uint256[](0);
-        GovernanceERC20.MintSettings memory mintSettings = GovernanceERC20.MintSettings(members, stakes);
-        CrossDomainMessengerMock messengerC = new CrossDomainMessengerMock();
-        ICrossDomainMessenger messenger = ICrossDomainMessenger(messengerC);
-        DAOProxyFactory factory = DAOProxyFactory(address(0xabc));
-        address proxyDAOImplementation = address(0xdef);
         bytes memory encodedData =
             abi.encode(votingSettings, tokenSettings, mintSettings, messenger, factory, proxyDAOImplementation);
-        crocssPluginSetup.prepareInstallation(address(dao), encodedData);
-    }
-
-    /*
-    function test_InitializePlugin() public {
-        console2.log("Hello0");
-        crocssPlugin = new CrocssPlugin();
-        console2.log("Hello2");
-        address daoAddress = address(0xf124);
-        bytes memory metadataValue = "metadata";
-        MajorityVotingBase.VotingSettings memory votingSettings = MajorityVotingBase.VotingSettings(1, 1, 0, 0);
-        //crocssPlugin.initialize(dao, votingSettings, govToken, mockMessenger, daoFactory, address(daoProxy));
-    }
-
-    function testInitialize() public {
-        MajorityVotingBase.VotingSettings memory votingSettings = MajorityVotingBase.VotingSettings(0,0,0,0);
-        IVotesUpgradeable token = IVotesUpgradeable(address(0x456));
-        ICrossDomainMessenger messenger = ICrossDomainMessenger(address(0x789));
-        DAOProxyFactory factory = DAOProxyFactory(address(0xabc));
-        address proxyDAOImplementation = address(0xdef);
-        crocssPlugin.initialize(
-            dao,
-            votingSettings,
-            token,
-            messenger,
-            factory,
-            proxyDAOImplementation
-        );
+        (address pluginAddress,) = crocssPluginSetup.prepareInstallation(address(dao), encodedData);
+        address implementationAddress = crocssPluginSetup.implementation();
+        assertEq(implementationAddress, address(0xa38D17ef017A314cCD72b8F199C0e108EF7Ca04c), "Wrong implementation address");
+        crocssPlugin = CrocssPlugin(pluginAddress);
+        assertEq(address(crocssPlugin), address(0x746326d3E4e54BA617F8aB39A21b7420aE8bF97d), "Wrong plugin address");
+        assertEq(address(crocssPlugin.getVotingToken()), address(0x2e234DAe75C793f67A35089C9d99245E1C58470b), "Wrong voting token address");
+        vm.roll(20);
+        assertEq(crocssPlugin.totalVotingPower(block.number - 1), 100, "Wrong voting power");
+        assertEq(govToken.balanceOf(creator), 100, "Wrong ");
     }
 
     function testCreateProposal() public {
-        // Define proposal parameters
-        string memory metadataValue = "Proposal metadata";
-        uint64 startDate = uint64(block.timestamp);
-        uint64 endDate = uint64(block.timestamp + 86400); // 1 day from now
-        IDAO.Action[] memory actions = new IDAO.Action[](1);
-        actions[0] = IDAO.Action(
-            address(0x457),
-            0,
-            ""
-        );
-        uint256 allowFailureMap = 0;
-        uint256 blockNumber = block.number;
-        bytes32 hash = bytes32("hash");
+        crocssPluginSetup = new CrocssPluginSetup(govToken, govWrappedToken);
+        bytes memory encodedData =
+            abi.encode(votingSettings, tokenSettings, mintSettings, messenger, factory, proxyDAOImplementation);
+        (address pluginAddress,) = crocssPluginSetup.prepareInstallation(address(dao), encodedData);
+        crocssPlugin = CrocssPlugin(pluginAddress);
+        vm.roll(20);
 
-        // Call createProposal function
         uint256 proposalId = crocssPlugin.createProposal(
-            bytes(metadataValue),
-            actions,
-            allowFailureMap,
-            startDate,
-            endDate,
-            blockNumber,
-            hash
+            "metadata",
+            new IDAO.Action[](0),
+            0,
+            uint64(block.timestamp),
+            uint64(block.timestamp + 86400),
+            block.number + 10,
+            bytes32("hash")
         );
+        assertEq(proposalId, 0, "Wrong proposal id");
 
-        // Assert that proposal parameters were set correctly
-        assertEq(proposalId, 1, "Proposal ID should be 1");
+        uint256 proposalId1 = crocssPlugin.createProposal(
+            "metadata",
+            new IDAO.Action[](0),
+            0,
+            uint64(block.timestamp),
+            uint64(block.timestamp + 86400),
+            block.number + 10,
+            bytes32("hash")
+        );
+        assertEq(proposalId1, 1, "Wrong proposal id");
+
+        crocssPlugin.bridgeProposal(proposalId);
     }
-    */
+
 }

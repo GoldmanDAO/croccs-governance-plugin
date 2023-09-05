@@ -145,7 +145,7 @@ contract CrocssPluginSetup is PluginSetup {
                 CrocssPlugin.initialize.selector,
                 _dao,
                 votingSettings,
-                tokenSettings,
+                tokenSettings.addr,
                 messenger,
                 factory,
                 proxyDAOImplementation

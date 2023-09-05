@@ -154,6 +154,10 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
         override
         returns (uint256 proposalId)
     {
+        uint256 snapshotBlock;
+        unchecked {
+            snapshotBlock = block.number - 1;
+        }
         // Check that either `_msgSender` owns enough tokens or has enough voting power from being a delegatee.
         {
             uint256 minProposerVotingPower_ = minProposerVotingPower();
@@ -169,12 +173,14 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
                 }
             }
         }
+        
+        
 
-        if (_blockNumber > block.number - 10 || _blockNumber < block.number) {
+        if (_blockNumber < block.number + 10) { //TODO Fix underflow and _blockNumber functionality 
             revert InvalidBlock();
         }
 
-        uint256 totalVotingPower_ = totalVotingPower(_blockNumber);
+        uint256 totalVotingPower_ = totalVotingPower(snapshotBlock);
 
         if (totalVotingPower_ == 0) {
             revert NoVotingPower();
@@ -196,10 +202,11 @@ contract CrocssPlugin is IMembership, MajorityVotingBase {
 
         proposal_.parameters.startDate = _startDate;
         proposal_.parameters.endDate = _endDate;
-        proposal_.parameters.snapshotBlock = uint64(_blockNumber);
+        proposal_.parameters.snapshotBlock = uint64(snapshotBlock);
         proposal_.parameters.supportThreshold = supportThreshold();
         proposal_.parameters.minVotingPower = _applyRatioCeiled(totalVotingPower_, minParticipation());
         proposal_.parameters.merkleRoot = _hash;
+        proposal_.status = ProposalState.PENDING;
 
         // Reduce costs
         if (_allowFailureMap != 0) {

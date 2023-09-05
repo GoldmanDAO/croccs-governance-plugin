@@ -9,7 +9,7 @@
 [license]: https://opensource.org/licenses/MIT
 [license-badge]: https://img.shields.io/badge/License-MIT-blue.svg
 
-Contracts for a L2 based voting.
+Contracts for a cheap L2 based voting for Aragon DAOs
 
 ## What's Inside
 

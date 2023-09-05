@@ -13,12 +13,12 @@ A Foundry-based template for developing Solidity smart contracts, with sensible 
 
 ## What's Inside
 
-- [Forge](https://github.com/foundry-rs/foundry/blob/master/forge): compile, test, fuzz, format, and deploy smart
-  contracts
-- [Forge Std](https://github.com/foundry-rs/forge-std): collection of helpful contracts and cheatcodes for testing
-- [PRBTest](https://github.com/PaulRBerg/prb-test): modern collection of testing assertions and logging utilities
-- [Prettier](https://github.com/prettier/prettier): code formatter for non-Solidity files
-- [Solhint Community](https://github.com/solhint-community/solhint-community): linter for Solidity code
+-   [Forge](https://github.com/foundry-rs/foundry/blob/master/forge): compile, test, fuzz, format, and deploy smart
+    contracts
+-   [Forge Std](https://github.com/foundry-rs/forge-std): collection of helpful contracts and cheatcodes for testing
+-   [PRBTest](https://github.com/PaulRBerg/prb-test): modern collection of testing assertions and logging utilities
+-   [Prettier](https://github.com/prettier/prettier): code formatter for non-Solidity files
+-   [Solhint Community](https://github.com/solhint-community/solhint-community): linter for Solidity code
 
 ## Getting Started
 
@@ -177,10 +177,10 @@ $ forge test
 
 ## Related Efforts
 
-- [abigger87/femplate](https://github.com/abigger87/femplate)
-- [cleanunicorn/ethereum-smartcontract-template](https://github.com/cleanunicorn/ethereum-smartcontract-template)
-- [foundry-rs/forge-template](https://github.com/foundry-rs/forge-template)
-- [FrankieIsLost/forge-template](https://github.com/FrankieIsLost/forge-template)
+-   [abigger87/femplate](https://github.com/abigger87/femplate)
+-   [cleanunicorn/ethereum-smartcontract-template](https://github.com/cleanunicorn/ethereum-smartcontract-template)
+-   [foundry-rs/forge-template](https://github.com/foundry-rs/forge-template)
+-   [FrankieIsLost/forge-template](https://github.com/FrankieIsLost/forge-template)
 
 ## License
 

@@ -1,13 +1,34 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity >=0.8.17 <=0.9.0;
+pragma solidity ^0.8.17;
 
-import { Foo } from "../src/Foo.sol";
+import "forge-std/Script.sol";
+import { DAOProxyFactory } from "src/DAOProxyFactory.sol";
+import { IL2CrossDomainMessenger } from "src/interfaces/IL2CrossDomainMessenger.sol";
+import { DAOProxy } from "src/DAOProxy.sol";
 
-import { BaseScript } from "./Base.s.sol";
+contract Deploy is Script {
+    DAOProxyFactory daoFactory;
+    DAOProxy daoProxy;
+    uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+    IL2CrossDomainMessenger xDomainMessenger = IL2CrossDomainMessenger(0x4200000000000000000000000000000000000007);
 
-/// @dev See the Solidity Scripting tutorial: https://book.getfoundry.sh/tutorials/solidity-scripting
-contract Deploy is BaseScript {
-  function run() public broadcast returns (Foo foo) {
-    foo = new Foo();
-  }
+    function run() public {
+        vm.startBroadcast(deployerPrivateKey);
+
+        daoProxy = new DAOProxy();
+        daoFactory = new DAOProxyFactory(xDomainMessenger, address(daoProxy));
+
+        vm.stopBroadcast();
+    }
+
+    function runTests(address _xDomainMessenger) public {
+        vm.startBroadcast(deployerPrivateKey);
+
+        xDomainMessenger = IL2CrossDomainMessenger(_xDomainMessenger);
+
+        daoProxy = new DAOProxy();
+        daoFactory = new DAOProxyFactory(xDomainMessenger, address(daoProxy));
+
+        vm.stopBroadcast();
+    }
 }

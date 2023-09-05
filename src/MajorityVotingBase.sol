@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-pragma solidity 0.8.17;
+pragma solidity ^0.8.17;
 
 import { ERC165Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -14,411 +14,433 @@ import { RATIO_BASE, RatioOutOfBounds } from "@osx/plugins/utils/Ratio.sol";
 import { IMajorityVoting } from "./IMajorityVoting.sol";
 
 abstract contract MajorityVotingBase is
-  IMajorityVoting,
-  Initializable,
-  ERC165Upgradeable,
-  PluginUUPSUpgradeable,
-  ProposalUpgradeable
+    IMajorityVoting,
+    Initializable,
+    ERC165Upgradeable,
+    PluginUUPSUpgradeable,
+    ProposalUpgradeable
 {
-  using SafeCastUpgradeable for uint256;
+    using SafeCastUpgradeable for uint256;
 
-  /// @notice A container for the majority voting settings that will be applied as parameters on proposal creation.
-  /// @param supportThreshold The support threshold value. Its value has to be in the interval [0, 10^6] defined by `RATIO_BASE = 10**6`.
-  /// @param minParticipation The minimum participation value. Its value has to be in the interval [0, 10^6] defined by `RATIO_BASE = 10**6`.
-  /// @param minDuration The minimum duration of the proposal vote in seconds.
-  /// @param minProposerVotingPower The minimum voting power required to create a proposal.
-  struct VotingSettings {
-    uint32 supportThreshold;
-    uint32 minParticipation;
-    uint64 minDuration;
-    uint256 minProposerVotingPower;
-  }
-
-  enum ProposalState {
-    PENDING,
-    ACTIVE,
-    VETOED,
-    INVALID,
-    EXECUTED
-  }
-
-  /// @notice A container for proposal-related information.
-  /// @param executed Whether the proposal is executed or not.
-  /// @param parameters The proposal parameters at the time of the proposal creation.
-  /// @param tally The vote tally of the proposal.
-  /// @param voters The votes casted by the voters.
-  /// @param actions The actions to be executed when the proposal passes.
-  /// @param allowFailureMap A bitmap allowing the proposal to succeed, even if individual actions might revert. If the bit at index `i` is 1, the proposal succeeds even if the `i`th action reverts. A failure map value of 0 requires every action to not revert.
-  struct Proposal {
-    ProposalState status;
-    ProposalParameters parameters;
-    Tally tally;
-    mapping(address => IMajorityVoting.VoteOption) voters;
-    IDAO.Action[] actions;
-    uint256 allowFailureMap;
-  }
-
-  /// @notice A container for the proposal parameters at the time of proposal creation.
-  /// @param supportThreshold The support threshold value. The value has to be in the interval [0, 10^6] defined by `RATIO_BASE = 10**6`.
-  /// @param startDate The start date of the proposal vote.
-  /// @param endDate The end date of the proposal vote.
-  /// @param snapshotBlock The number of the block prior to the proposal creation.
-  /// @param minVotingPower The minimum voting power needed.
-  struct ProposalParameters {
-    uint32 supportThreshold;
-    uint64 startDate;
-    uint64 endDate;
-    uint64 snapshotBlock;
-    uint256 minVotingPower;
-    bytes32 merkleRoot;
-  }
-
-  /// @notice A container for the proposal vote tally.
-  /// @param abstain The number of abstain votes casted.
-  /// @param yes The number of yes votes casted.
-  /// @param no The number of no votes casted.
-  struct Tally {
-    uint256 abstain;
-    uint256 yes;
-    uint256 no;
-  }
-
-  /// @notice The [ERC-165](https://eips.ethereum.org/EIPS/eip-165) interface ID of the contract.
-  bytes4 internal constant MAJORITY_VOTING_BASE_INTERFACE_ID =
-    this.minDuration.selector ^
-      this.minProposerVotingPower.selector ^
-      this.totalVotingPower.selector ^
-      this.getProposal.selector ^
-      this.updateVotingSettings.selector ^
-      this.createProposal.selector;
-
-  /// @notice The ID of the permission required to call the `updateVotingSettings` function.
-  bytes32 public constant UPDATE_VOTING_SETTINGS_PERMISSION_ID = keccak256("UPDATE_VOTING_SETTINGS_PERMISSION");
-
-  /// @notice A mapping between proposal IDs and proposal information.
-  mapping(uint256 => Proposal) internal proposals;
-
-  /// @notice The struct storing the voting settings.
-  VotingSettings private votingSettings;
-
-  /// @notice Thrown if a date is out of bounds.
-  /// @param limit The limit value.
-  /// @param actual The actual value.
-  error DateOutOfBounds(uint64 limit, uint64 actual);
-
-  /// @notice Thrown if the minimal duration value is out of bounds (less than one hour or greater than 1 year).
-  /// @param limit The limit value.
-  /// @param actual The actual value.
-  error MinDurationOutOfBounds(uint64 limit, uint64 actual);
-
-  /// @notice Thrown when a sender is not allowed to create a proposal.
-  /// @param sender The sender address.
-  error ProposalCreationForbidden(address sender);
-
-  /// @notice Thrown if an account is not allowed to cast a vote. This can be because the vote
-  /// - has not started,
-  /// - has ended,
-  /// - was executed, or
-  /// - the account doesn't have voting powers.
-  /// @param proposalId The ID of the proposal.
-  /// @param account The address of the _account.
-  /// @param voteOption The chosen vote option.
-  error VoteCastForbidden(uint256 proposalId, address account, VoteOption voteOption);
-
-  /// @notice Thrown if the proposal execution is forbidden.
-  /// @param proposalId The ID of the proposal.
-  error ProposalExecutionForbidden(uint256 proposalId);
-
-  /// @notice Emitted when the voting settings are updated.
-  /// @param supportThreshold The support threshold value.
-  /// @param minParticipation The minimum participation value.
-  /// @param minDuration The minimum duration of the proposal vote in seconds.
-  /// @param minProposerVotingPower The minimum voting power required to create a proposal.
-  event VotingSettingsUpdated(
-    uint32 supportThreshold,
-    uint32 minParticipation,
-    uint64 minDuration,
-    uint256 minProposerVotingPower
-  );
-
-  /// @notice Initializes the component to be used by inheriting contracts.
-  /// @dev This method is required to support [ERC-1822](https://eips.ethereum.org/EIPS/eip-1822).
-  /// @param _dao The IDAO interface of the associated DAO.
-  /// @param _votingSettings The voting settings.
-  function __MajorityVotingBase_init(IDAO _dao, VotingSettings calldata _votingSettings) internal onlyInitializing {
-    __PluginUUPSUpgradeable_init(_dao);
-    _updateVotingSettings(_votingSettings);
-  }
-
-  /// @notice Checks if this or the parent contract supports an interface by its ID.
-  /// @param _interfaceId The ID of the interface.
-  /// @return Returns `true` if the interface is supported.
-  function supportsInterface(
-    bytes4 _interfaceId
-  ) public view virtual override(ERC165Upgradeable, PluginUUPSUpgradeable, ProposalUpgradeable) returns (bool) {
-    return
-      _interfaceId == MAJORITY_VOTING_BASE_INTERFACE_ID ||
-      _interfaceId == type(IMajorityVoting).interfaceId ||
-      super.supportsInterface(_interfaceId);
-  }
-
-  /// @inheritdoc IMajorityVoting
-  function execute(uint256 _proposalId) public virtual {
-    if (!_canExecute(_proposalId)) {
-      revert ProposalExecutionForbidden(_proposalId);
+    /// @notice A container for the majority voting settings that will be applied as parameters on proposal creation.
+    /// @param supportThreshold The support threshold value. Its value has to be in the interval [0, 10^6] defined by
+    /// `RATIO_BASE = 10**6`.
+    /// @param minParticipation The minimum participation value. Its value has to be in the interval [0, 10^6] defined
+    /// by `RATIO_BASE = 10**6`.
+    /// @param minDuration The minimum duration of the proposal vote in seconds.
+    /// @param minProposerVotingPower The minimum voting power required to create a proposal.
+    struct VotingSettings {
+        uint32 supportThreshold;
+        uint32 minParticipation;
+        uint64 minDuration;
+        uint256 minProposerVotingPower;
     }
-    _execute(_proposalId);
-  }
 
-  function getVoteOption(uint256 _proposalId, address _voter) public view virtual returns (VoteOption) {
-    return proposals[_proposalId].voters[_voter];
-  }
+    enum ProposalState {
+        PENDING,
+        ACTIVE,
+        VETOED,
+        INVALID,
+        EXECUTED
+    }
 
-  /// @inheritdoc IMajorityVoting
-  function canVote(uint256 _proposalId, address _voter, VoteOption _voteOption) public view virtual returns (bool) {
-    return _canVote(_proposalId, _voter, _voteOption);
-  }
+    /// @notice A container for proposal-related information.
+    /// @param executed Whether the proposal is executed or not.
+    /// @param parameters The proposal parameters at the time of the proposal creation.
+    /// @param tally The vote tally of the proposal.
+    /// @param voters The votes casted by the voters.
+    /// @param actions The actions to be executed when the proposal passes.
+    /// @param allowFailureMap A bitmap allowing the proposal to succeed, even if individual actions might revert. If
+    /// the bit at index `i` is 1, the proposal succeeds even if the `i`th action reverts. A failure map value of 0
+    /// requires every action to not revert.
+    struct Proposal {
+        ProposalState status;
+        ProposalParameters parameters;
+        Tally tally;
+        mapping(address => IMajorityVoting.VoteOption) voters;
+        IDAO.Action[] actions;
+        uint256 allowFailureMap;
+    }
 
-  /// @inheritdoc IMajorityVoting
-  function canExecute(uint256 _proposalId) public view virtual returns (bool) {
-    return _canExecute(_proposalId);
-  }
+    /// @notice A container for the proposal parameters at the time of proposal creation.
+    /// @param supportThreshold The support threshold value. The value has to be in the interval [0, 10^6] defined by
+    /// `RATIO_BASE = 10**6`.
+    /// @param startDate The start date of the proposal vote.
+    /// @param endDate The end date of the proposal vote.
+    /// @param snapshotBlock The number of the block prior to the proposal creation.
+    /// @param minVotingPower The minimum voting power needed.
+    struct ProposalParameters {
+        uint32 supportThreshold;
+        uint64 startDate;
+        uint64 endDate;
+        uint64 snapshotBlock;
+        uint256 minVotingPower;
+        bytes32 merkleRoot;
+    }
 
-  /// @inheritdoc IMajorityVoting
-  function isSupportThresholdReached(uint256 _proposalId) public view virtual returns (bool) {
-    Proposal storage proposal_ = proposals[_proposalId];
+    /// @notice A container for the proposal vote tally.
+    /// @param abstain The number of abstain votes casted.
+    /// @param yes The number of yes votes casted.
+    /// @param no The number of no votes casted.
+    struct Tally {
+        uint256 abstain;
+        uint256 yes;
+        uint256 no;
+    }
 
-    // The code below implements the formula of the support criterion explained in the top of this file.
-    // `(1 - supportThreshold) * N_yes > supportThreshold *  N_no`
-    return
-      (RATIO_BASE - proposal_.parameters.supportThreshold) * proposal_.tally.yes >
-      proposal_.parameters.supportThreshold * proposal_.tally.no;
-  }
+    /// @notice The [ERC-165](https://eips.ethereum.org/EIPS/eip-165) interface ID of the contract.
+    bytes4 internal constant MAJORITY_VOTING_BASE_INTERFACE_ID = this.minDuration.selector
+        ^ this.minProposerVotingPower.selector ^ this.totalVotingPower.selector ^ this.getProposal.selector
+        ^ this.updateVotingSettings.selector ^ this.createProposal.selector;
 
-  /// @inheritdoc IMajorityVoting
-  function isSupportThresholdReachedEarly(uint256 _proposalId) public view virtual returns (bool) {
-    Proposal storage proposal_ = proposals[_proposalId];
+    /// @notice The ID of the permission required to call the `updateVotingSettings` function.
+    bytes32 public constant UPDATE_VOTING_SETTINGS_PERMISSION_ID = keccak256("UPDATE_VOTING_SETTINGS_PERMISSION");
 
-    uint256 noVotesWorstCase = totalVotingPower(proposal_.parameters.snapshotBlock) -
-      proposal_.tally.yes -
-      proposal_.tally.abstain;
+    /// @notice A mapping between proposal IDs and proposal information.
+    mapping(uint256 => Proposal) internal proposals;
 
-    // The code below implements the formula of the early execution support criterion explained in the top of this file.
-    // `(1 - supportThreshold) * N_yes > supportThreshold *  N_no,worst-case`
-    return
-      (RATIO_BASE - proposal_.parameters.supportThreshold) * proposal_.tally.yes >
-      proposal_.parameters.supportThreshold * noVotesWorstCase;
-  }
+    /// @notice The struct storing the voting settings.
+    VotingSettings private votingSettings;
 
-  /// @inheritdoc IMajorityVoting
-  function isMinParticipationReached(uint256 _proposalId) public view virtual returns (bool) {
-    Proposal storage proposal_ = proposals[_proposalId];
+    /// @notice Thrown if a date is out of bounds.
+    /// @param limit The limit value.
+    /// @param actual The actual value.
+    error DateOutOfBounds(uint64 limit, uint64 actual);
 
-    // The code below implements the formula of the participation criterion explained in the top of this file.
-    // `N_yes + N_no + N_abstain >= minVotingPower = minParticipation * N_total`
-    return proposal_.tally.yes + proposal_.tally.no + proposal_.tally.abstain >= proposal_.parameters.minVotingPower;
-  }
+    /// @notice Thrown if the minimal duration value is out of bounds (less than one hour or greater than 1 year).
+    /// @param limit The limit value.
+    /// @param actual The actual value.
+    error MinDurationOutOfBounds(uint64 limit, uint64 actual);
 
-  /// @inheritdoc IMajorityVoting
-  function supportThreshold() public view virtual returns (uint32) {
-    return votingSettings.supportThreshold;
-  }
+    /// @notice Thrown when a sender is not allowed to create a proposal.
+    /// @param sender The sender address.
+    error ProposalCreationForbidden(address sender);
 
-  /// @inheritdoc IMajorityVoting
-  function minParticipation() public view virtual returns (uint32) {
-    return votingSettings.minParticipation;
-  }
+    /// @notice Thrown if an account is not allowed to cast a vote. This can be because the vote
+    /// - has not started,
+    /// - has ended,
+    /// - was executed, or
+    /// - the account doesn't have voting powers.
+    /// @param proposalId The ID of the proposal.
+    /// @param account The address of the _account.
+    /// @param voteOption The chosen vote option.
+    error VoteCastForbidden(uint256 proposalId, address account, VoteOption voteOption);
 
-  /// @notice Returns the minimum duration parameter stored in the voting settings.
-  /// @return The minimum duration parameter.
-  function minDuration() public view virtual returns (uint64) {
-    return votingSettings.minDuration;
-  }
+    /// @notice Thrown if the proposal execution is forbidden.
+    /// @param proposalId The ID of the proposal.
+    error ProposalExecutionForbidden(uint256 proposalId);
 
-  /// @notice Returns the minimum voting power required to create a proposa stored in the voting settings.
-  /// @return The minimum voting power required to create a proposal.
-  function minProposerVotingPower() public view virtual returns (uint256) {
-    return votingSettings.minProposerVotingPower;
-  }
+    /// @notice Emitted when the voting settings are updated.
+    /// @param supportThreshold The support threshold value.
+    /// @param minParticipation The minimum participation value.
+    /// @param minDuration The minimum duration of the proposal vote in seconds.
+    /// @param minProposerVotingPower The minimum voting power required to create a proposal.
+    event VotingSettingsUpdated(
+        uint32 supportThreshold, uint32 minParticipation, uint64 minDuration, uint256 minProposerVotingPower
+    );
 
-  /// @notice Returns the total voting power checkpointed for a specific block number.
-  /// @param _blockNumber The block number.
-  /// @return The total voting power.
-  function totalVotingPower(uint256 _blockNumber) public view virtual returns (uint256);
+    /// @notice Initializes the component to be used by inheriting contracts.
+    /// @dev This method is required to support [ERC-1822](https://eips.ethereum.org/EIPS/eip-1822).
+    /// @param _dao The IDAO interface of the associated DAO.
+    /// @param _votingSettings The voting settings.
+    function __MajorityVotingBase_init(IDAO _dao, VotingSettings calldata _votingSettings) internal onlyInitializing {
+        __PluginUUPSUpgradeable_init(_dao);
+        _updateVotingSettings(_votingSettings);
+    }
 
-  /// @notice Returns all information for a proposal vote by its ID.
-  /// @param _proposalId The ID of the proposal.
-  /// @return open Whether the proposal is open or not.
-  /// @return status Whether the proposal is executed or not.
-  /// @return parameters The parameters of the proposal vote.
-  /// @return tally The current tally of the proposal vote.
-  /// @return actions The actions to be executed in the associated DAO after the proposal has passed.
-  /// @return allowFailureMap The bit map representations of which actions are allowed to revert so tx still succeeds.
-  function getProposal(
-    uint256 _proposalId
-  )
-    public
-    view
-    virtual
-    returns (
-      bool open,
-      ProposalState status,
-      ProposalParameters memory parameters,
-      Tally memory tally,
-      IDAO.Action[] memory actions,
-      uint256 allowFailureMap
+    /// @notice Checks if this or the parent contract supports an interface by its ID.
+    /// @param _interfaceId The ID of the interface.
+    /// @return Returns `true` if the interface is supported.
+    function supportsInterface(bytes4 _interfaceId)
+        public
+        view
+        virtual
+        override(ERC165Upgradeable, PluginUUPSUpgradeable, ProposalUpgradeable)
+        returns (bool)
+    {
+        return _interfaceId == MAJORITY_VOTING_BASE_INTERFACE_ID || _interfaceId == type(IMajorityVoting).interfaceId
+            || super.supportsInterface(_interfaceId);
+    }
+
+    /// @inheritdoc IMajorityVoting
+    function execute(uint256 _proposalId) public virtual {
+        if (!_canExecute(_proposalId)) {
+            revert ProposalExecutionForbidden(_proposalId);
+        }
+        _execute(_proposalId);
+    }
+
+    function getVoteOption(uint256 _proposalId, address _voter) public view virtual returns (VoteOption) {
+        return proposals[_proposalId].voters[_voter];
+    }
+
+    /// @inheritdoc IMajorityVoting
+    function canVote(uint256 _proposalId, address _voter, VoteOption _voteOption) public view virtual returns (bool) {
+        return _canVote(_proposalId, _voter, _voteOption);
+    }
+
+    /// @inheritdoc IMajorityVoting
+    function canExecute(uint256 _proposalId) public view virtual returns (bool) {
+        return _canExecute(_proposalId);
+    }
+
+    /// @inheritdoc IMajorityVoting
+    function isSupportThresholdReached(uint256 _proposalId) public view virtual returns (bool) {
+        Proposal storage proposal_ = proposals[_proposalId];
+
+        // The code below implements the formula of the support criterion explained in the top of this file.
+        // `(1 - supportThreshold) * N_yes > supportThreshold *  N_no`
+        return (RATIO_BASE - proposal_.parameters.supportThreshold) * proposal_.tally.yes
+            > proposal_.parameters.supportThreshold * proposal_.tally.no;
+    }
+
+    /// @inheritdoc IMajorityVoting
+    function isSupportThresholdReachedEarly(uint256 _proposalId) public view virtual returns (bool) {
+        Proposal storage proposal_ = proposals[_proposalId];
+
+        uint256 noVotesWorstCase =
+            totalVotingPower(proposal_.parameters.snapshotBlock) - proposal_.tally.yes - proposal_.tally.abstain;
+
+        // The code below implements the formula of the early execution support criterion explained in the top of this
+        // file.
+        // `(1 - supportThreshold) * N_yes > supportThreshold *  N_no,worst-case`
+        return (RATIO_BASE - proposal_.parameters.supportThreshold) * proposal_.tally.yes
+            > proposal_.parameters.supportThreshold * noVotesWorstCase;
+    }
+
+    /// @inheritdoc IMajorityVoting
+    function isMinParticipationReached(uint256 _proposalId) public view virtual returns (bool) {
+        Proposal storage proposal_ = proposals[_proposalId];
+
+        // The code below implements the formula of the participation criterion explained in the top of this file.
+        // `N_yes + N_no + N_abstain >= minVotingPower = minParticipation * N_total`
+        return proposal_.tally.yes + proposal_.tally.no + proposal_.tally.abstain >= proposal_.parameters.minVotingPower;
+    }
+
+    /// @inheritdoc IMajorityVoting
+    function supportThreshold() public view virtual returns (uint32) {
+        return votingSettings.supportThreshold;
+    }
+
+    /// @inheritdoc IMajorityVoting
+    function minParticipation() public view virtual returns (uint32) {
+        return votingSettings.minParticipation;
+    }
+
+    /// @notice Returns the minimum duration parameter stored in the voting settings.
+    /// @return The minimum duration parameter.
+    function minDuration() public view virtual returns (uint64) {
+        return votingSettings.minDuration;
+    }
+
+    /// @notice Returns the minimum voting power required to create a proposa stored in the voting settings.
+    /// @return The minimum voting power required to create a proposal.
+    function minProposerVotingPower() public view virtual returns (uint256) {
+        return votingSettings.minProposerVotingPower;
+    }
+
+    /// @notice Returns the total voting power checkpointed for a specific block number.
+    /// @param _blockNumber The block number.
+    /// @return The total voting power.
+    function totalVotingPower(uint256 _blockNumber) public view virtual returns (uint256);
+
+    /// @notice Returns all information for a proposal vote by its ID.
+    /// @param _proposalId The ID of the proposal.
+    /// @return open Whether the proposal is open or not.
+    /// @return status Whether the proposal is executed or not.
+    /// @return parameters The parameters of the proposal vote.
+    /// @return tally The current tally of the proposal vote.
+    /// @return actions The actions to be executed in the associated DAO after the proposal has passed.
+    /// @return allowFailureMap The bit map representations of which actions are allowed to revert so tx still succeeds.
+    function getProposal(uint256 _proposalId)
+        public
+        view
+        virtual
+        returns (
+            bool open,
+            ProposalState status,
+            ProposalParameters memory parameters,
+            Tally memory tally,
+            IDAO.Action[] memory actions,
+            uint256 allowFailureMap
+        )
+    {
+        Proposal storage proposal_ = proposals[_proposalId];
+
+        open = _isProposalOpen(proposal_);
+        status = proposal_.status;
+        parameters = proposal_.parameters;
+        tally = proposal_.tally;
+        actions = proposal_.actions;
+        allowFailureMap = proposal_.allowFailureMap;
+    }
+
+    /// @notice Updates the voting settings.
+    /// @param _votingSettings The new voting settings.
+    function updateVotingSettings(VotingSettings calldata _votingSettings)
+        external
+        virtual
+        auth(UPDATE_VOTING_SETTINGS_PERMISSION_ID)
+    {
+        _updateVotingSettings(_votingSettings);
+    }
+
+    /// @notice Creates a new majority voting proposal.
+    /// @param _metadata The metadata of the proposal.
+    /// @param _actions The actions that will be executed after the proposal passes.
+    /// @param _allowFailureMap Allows proposal to succeed even if an action reverts. Uses bitmap representation. If the
+    /// bit at index `x` is 1, the tx succeeds even if the action at `x` failed. Passing 0 will be treated as atomic
+    /// execution.
+    /// @param _startDate The start date of the proposal vote. If 0, the current timestamp is used and the vote starts
+    /// immediately.
+    /// @param _endDate The end date of the proposal vote. If 0, `_startDate + minDuration` is used.
+    /// @return proposalId The ID of the proposal.
+    function createProposal(
+        bytes calldata _metadata,
+        IDAO.Action[] calldata _actions,
+        uint256 _allowFailureMap,
+        uint64 _startDate,
+        uint64 _endDate,
+        uint256 _blockNumber,
+        bytes32 _hash
     )
-  {
-    Proposal storage proposal_ = proposals[_proposalId];
+        external
+        virtual
+        returns (uint256 proposalId);
 
-    open = _isProposalOpen(proposal_);
-    status = proposal_.status;
-    parameters = proposal_.parameters;
-    tally = proposal_.tally;
-    actions = proposal_.actions;
-    allowFailureMap = proposal_.allowFailureMap;
-  }
+    /// @notice Internal function to execute a vote. It assumes the queried proposal exists.
+    /// @param _proposalId The ID of the proposal.
+    function _execute(uint256 _proposalId) internal virtual {
+        proposals[_proposalId].status = ProposalState.EXECUTED;
 
-  /// @notice Updates the voting settings.
-  /// @param _votingSettings The new voting settings.
-  function updateVotingSettings(
-    VotingSettings calldata _votingSettings
-  ) external virtual auth(UPDATE_VOTING_SETTINGS_PERMISSION_ID) {
-    _updateVotingSettings(_votingSettings);
-  }
-
-  /// @notice Creates a new majority voting proposal.
-  /// @param _metadata The metadata of the proposal.
-  /// @param _actions The actions that will be executed after the proposal passes.
-  /// @param _allowFailureMap Allows proposal to succeed even if an action reverts. Uses bitmap representation. If the bit at index `x` is 1, the tx succeeds even if the action at `x` failed. Passing 0 will be treated as atomic execution.
-  /// @param _startDate The start date of the proposal vote. If 0, the current timestamp is used and the vote starts immediately.
-  /// @param _endDate The end date of the proposal vote. If 0, `_startDate + minDuration` is used.
-  /// @return proposalId The ID of the proposal.
-  function createProposal(
-    bytes calldata _metadata,
-    IDAO.Action[] calldata _actions,
-    uint256 _allowFailureMap,
-    uint64 _startDate,
-    uint64 _endDate,
-    uint256 _blockNumber,
-    bytes32 _hash
-  ) external virtual returns (uint256 proposalId);
-
-  /// @notice Internal function to execute a vote. It assumes the queried proposal exists.
-  /// @param _proposalId The ID of the proposal.
-  function _execute(uint256 _proposalId) internal virtual {
-    proposals[_proposalId].status = ProposalState.EXECUTED;
-
-    _executeProposal(dao(), _proposalId, proposals[_proposalId].actions, proposals[_proposalId].allowFailureMap);
-  }
-
-  /// @notice Internal function to check if a voter can vote. It assumes the queried proposal exists.
-  /// @param _proposalId The ID of the proposal.
-  /// @param _voter The address of the voter to check.
-  /// @param  _voteOption Whether the voter abstains, supports or opposes the proposal.
-  /// @return Returns `true` if the given voter can vote on a certain proposal and `false` otherwise.
-  function _canVote(uint256 _proposalId, address _voter, VoteOption _voteOption) internal view virtual returns (bool);
-
-  /// @notice Internal function to check if a proposal can be executed. It assumes the queried proposal exists.
-  /// @param _proposalId The ID of the proposal.
-  /// @return True if the proposal can be executed, false otherwise.
-  /// @dev Threshold and minimal values are compared with `>` and `>=` comparators, respectively.
-  function _canExecute(uint256 _proposalId) internal view virtual returns (bool) {
-    Proposal storage proposal_ = proposals[_proposalId];
-
-    // Verify that the vote has not been executed already.
-    if (proposal_.status != ProposalState.ACTIVE) {
-      return false;
+        _executeProposal(dao(), _proposalId, proposals[_proposalId].actions, proposals[_proposalId].allowFailureMap);
     }
 
-    // Normal execution
-    if (!isSupportThresholdReached(_proposalId)) {
-      return false;
-    }
-    if (!isMinParticipationReached(_proposalId)) {
-      return false;
-    }
+    /// @notice Internal function to check if a voter can vote. It assumes the queried proposal exists.
+    /// @param _proposalId The ID of the proposal.
+    /// @param _voter The address of the voter to check.
+    /// @param  _voteOption Whether the voter abstains, supports or opposes the proposal.
+    /// @return Returns `true` if the given voter can vote on a certain proposal and `false` otherwise.
+    function _canVote(
+        uint256 _proposalId,
+        address _voter,
+        VoteOption _voteOption
+    )
+        internal
+        view
+        virtual
+        returns (bool);
 
-    return true;
-  }
+    /// @notice Internal function to check if a proposal can be executed. It assumes the queried proposal exists.
+    /// @param _proposalId The ID of the proposal.
+    /// @return True if the proposal can be executed, false otherwise.
+    /// @dev Threshold and minimal values are compared with `>` and `>=` comparators, respectively.
+    function _canExecute(uint256 _proposalId) internal view virtual returns (bool) {
+        Proposal storage proposal_ = proposals[_proposalId];
 
-  /// @notice Internal function to check if a proposal vote is still open.
-  /// @param proposal_ The proposal struct.
-  /// @return True if the proposal vote is open, false otherwise.
-  function _isProposalOpen(Proposal storage proposal_) internal view virtual returns (bool) {
-    uint64 currentTime = block.timestamp.toUint64();
+        // Verify that the vote has not been executed already.
+        if (proposal_.status != ProposalState.ACTIVE) {
+            return false;
+        }
 
-    return
-      proposal_.parameters.startDate <= currentTime &&
-      currentTime < proposal_.parameters.endDate &&
-      proposal_.status == ProposalState.ACTIVE;
-  }
+        // Normal execution
+        if (!isSupportThresholdReached(_proposalId)) {
+            return false;
+        }
+        if (!isMinParticipationReached(_proposalId)) {
+            return false;
+        }
 
-  /// @notice Internal function to update the plugin-wide proposal vote settings.
-  /// @param _votingSettings The voting settings to be validated and updated.
-  function _updateVotingSettings(VotingSettings calldata _votingSettings) internal virtual {
-    // Require the support threshold value to be in the interval [0, 10^6-1], because `>` comparision is used in the support criterion and >100% could never be reached.
-    if (_votingSettings.supportThreshold > RATIO_BASE - 1) {
-      revert RatioOutOfBounds({ limit: RATIO_BASE - 1, actual: _votingSettings.supportThreshold });
-    }
-
-    // Require the minimum participation value to be in the interval [0, 10^6], because `>=` comparision is used in the participation criterion.
-    if (_votingSettings.minParticipation > RATIO_BASE) {
-      revert RatioOutOfBounds({ limit: RATIO_BASE, actual: _votingSettings.minParticipation });
-    }
-
-    if (_votingSettings.minDuration < 60 minutes) {
-      revert MinDurationOutOfBounds({ limit: 60 minutes, actual: _votingSettings.minDuration });
+        return true;
     }
 
-    if (_votingSettings.minDuration > 365 days) {
-      revert MinDurationOutOfBounds({ limit: 365 days, actual: _votingSettings.minDuration });
+    /// @notice Internal function to check if a proposal vote is still open.
+    /// @param proposal_ The proposal struct.
+    /// @return True if the proposal vote is open, false otherwise.
+    function _isProposalOpen(Proposal storage proposal_) internal view virtual returns (bool) {
+        uint64 currentTime = block.timestamp.toUint64();
+
+        return proposal_.parameters.startDate <= currentTime && currentTime < proposal_.parameters.endDate
+            && proposal_.status == ProposalState.ACTIVE;
     }
 
-    votingSettings = _votingSettings;
+    /// @notice Internal function to update the plugin-wide proposal vote settings.
+    /// @param _votingSettings The voting settings to be validated and updated.
+    function _updateVotingSettings(VotingSettings calldata _votingSettings) internal virtual {
+        // Require the support threshold value to be in the interval [0, 10^6-1], because `>` comparision is used in the
+        // support criterion and >100% could never be reached.
+        if (_votingSettings.supportThreshold > RATIO_BASE - 1) {
+            revert RatioOutOfBounds({ limit: RATIO_BASE - 1, actual: _votingSettings.supportThreshold });
+        }
 
-    emit VotingSettingsUpdated({
-      supportThreshold: _votingSettings.supportThreshold,
-      minParticipation: _votingSettings.minParticipation,
-      minDuration: _votingSettings.minDuration,
-      minProposerVotingPower: _votingSettings.minProposerVotingPower
-    });
-  }
+        // Require the minimum participation value to be in the interval [0, 10^6], because `>=` comparision is used in
+        // the participation criterion.
+        if (_votingSettings.minParticipation > RATIO_BASE) {
+            revert RatioOutOfBounds({ limit: RATIO_BASE, actual: _votingSettings.minParticipation });
+        }
 
-  /// @notice Validates and returns the proposal vote dates.
-  /// @param _start The start date of the proposal vote. If 0, the current timestamp is used and the vote starts immediately.
-  /// @param _end The end date of the proposal vote. If 0, `_start + minDuration` is used.
-  /// @return startDate The validated start date of the proposal vote.
-  /// @return endDate The validated end date of the proposal vote.
-  function _validateProposalDates(
-    uint64 _start,
-    uint64 _end
-  ) internal view virtual returns (uint64 startDate, uint64 endDate) {
-    uint64 currentTimestamp = block.timestamp.toUint64();
+        if (_votingSettings.minDuration < 60 minutes) {
+            revert MinDurationOutOfBounds({ limit: 60 minutes, actual: _votingSettings.minDuration });
+        }
 
-    if (_start == 0) {
-      startDate = currentTimestamp;
-    } else {
-      startDate = _start;
+        if (_votingSettings.minDuration > 365 days) {
+            revert MinDurationOutOfBounds({ limit: 365 days, actual: _votingSettings.minDuration });
+        }
 
-      if (startDate < currentTimestamp) {
-        revert DateOutOfBounds({ limit: currentTimestamp, actual: startDate });
-      }
+        votingSettings = _votingSettings;
+
+        emit VotingSettingsUpdated({
+            supportThreshold: _votingSettings.supportThreshold,
+            minParticipation: _votingSettings.minParticipation,
+            minDuration: _votingSettings.minDuration,
+            minProposerVotingPower: _votingSettings.minProposerVotingPower
+        });
     }
 
-    uint64 earliestEndDate = startDate + votingSettings.minDuration; // Since `minDuration` is limited to 1 year, `startDate + minDuration` can only overflow if the `startDate` is after `type(uint64).max - minDuration`. In this case, the proposal creation will revert and another date can be picked.
+    /// @notice Validates and returns the proposal vote dates.
+    /// @param _start The start date of the proposal vote. If 0, the current timestamp is used and the vote starts
+    /// immediately.
+    /// @param _end The end date of the proposal vote. If 0, `_start + minDuration` is used.
+    /// @return startDate The validated start date of the proposal vote.
+    /// @return endDate The validated end date of the proposal vote.
+    function _validateProposalDates(
+        uint64 _start,
+        uint64 _end
+    )
+        internal
+        view
+        virtual
+        returns (uint64 startDate, uint64 endDate)
+    {
+        uint64 currentTimestamp = block.timestamp.toUint64();
 
-    if (_end == 0) {
-      endDate = earliestEndDate;
-    } else {
-      endDate = _end;
+        if (_start == 0) {
+            startDate = currentTimestamp;
+        } else {
+            startDate = _start;
 
-      if (endDate < earliestEndDate) {
-        revert DateOutOfBounds({ limit: earliestEndDate, actual: endDate });
-      }
+            if (startDate < currentTimestamp) {
+                revert DateOutOfBounds({ limit: currentTimestamp, actual: startDate });
+            }
+        }
+
+        uint64 earliestEndDate = startDate + votingSettings.minDuration; // Since `minDuration` is limited to 1 year,
+            // `startDate + minDuration` can only overflow if the `startDate` is after `type(uint64).max - minDuration`.
+            // In this case, the proposal creation will revert and another date can be picked.
+
+        if (_end == 0) {
+            endDate = earliestEndDate;
+        } else {
+            endDate = _end;
+
+            if (endDate < earliestEndDate) {
+                revert DateOutOfBounds({ limit: earliestEndDate, actual: endDate });
+            }
+        }
     }
-  }
 
-  /// @notice This empty reserved space is put in place to allow future versions to add new variables without shifting down storage in the inheritance chain (see [OpenZepplins guide about storage gaps](https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps)).
-  uint256[47] private __gap;
+    /// @notice This empty reserved space is put in place to allow future versions to add new variables without shifting
+    /// down storage in the inheritance chain (see [OpenZepplins guide about storage
+    /// gaps](https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps)).
+    uint256[47] private __gap;
 }
